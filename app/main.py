@@ -170,7 +170,7 @@ class NPMRequester:
 
 
 def load_config():
-    config_path = '../config.env.toml' if ENV == 'dev' else '/data/config'
+    config_path = '../config.env.toml' if ENV == 'dev' else '/data/config.toml'
     if not os.path.exists(config_path):
         raise Exception(f'config file not found: {config_path}')
     with open(config_path, 'rb') as file:
