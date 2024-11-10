@@ -169,15 +169,6 @@ class NPMRequester:
         return meta
 
 
-def load_config():
-    config_path = '../config.env.toml' if ENV == 'dev' else '/data/config.toml'
-    if not os.path.exists(config_path):
-        raise Exception(f'config file not found: {config_path}')
-    with open(config_path, 'rb') as file:
-        data = tomllib.load(file)
-    return Config(**data)
-
-
 class NPMSync:
     def __init__(self, config: Config):
         self.config: Config = config
@@ -230,9 +221,16 @@ class NPMSync:
                 msg = f'[{domain}] sync failed: {e}'
                 failed.append(msg)
                 logger.error(msg)
-        if failed:
-            raise Exception('; '.join(failed))
         return failed
+
+
+def load_config():
+    config_path = '../config.env.toml' if ENV == 'dev' else '/data/config.toml'
+    if not os.path.exists(config_path):
+        raise Exception(f'config file not found: {config_path}')
+    with open(config_path, 'rb') as file:
+        data = tomllib.load(file)
+    return Config(**data)
 
 
 def main():
