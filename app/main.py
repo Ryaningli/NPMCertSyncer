@@ -9,6 +9,9 @@ from dataclasses import dataclass, field
 import tomllib
 import signal
 import sys
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from typing import overload, Literal, Optional, Any
 
 logger = logging.getLogger()
@@ -31,6 +34,41 @@ class Config:
     interval: int = 60 * 60 * 24  # 间隔时间
     ssl_verify: bool = True
     sync_domains: list[str] = field(default_factory=list)
+
+    email_send: bool = False
+    email_stmp_host: str = None
+    email_stmp_port: int = None
+    email_send_from: str = None
+    email_stmp_password: str = None
+    email_send_to: str = None
+
+
+def send_email(config: Config, subject, body):
+    requires_keys = [
+        'email_stmp_host',
+        'email_stmp_port',
+        'email_send_from',
+        'email_stmp_password',
+        'email_send_to'
+    ]
+    for key in requires_keys:
+        if not getattr(config, key):
+            raise Exception(f'config.{key} must be set')
+    msg = MIMEMultipart()
+    msg['From'] = config.email_send_from
+    msg['To'] = config.email_send_to
+    msg['Subject'] = subject
+    msg.attach(MIMEText(body, 'html'))
+
+    server = smtplib.SMTP_SSL(config.email_stmp_host, config.email_stmp_port, timeout=10)
+    try:
+        server.login(config.email_send_from, config.email_stmp_password)
+        server.sendmail(config.email_send_from, config.email_send_to, msg.as_string())
+        logger.info('Email sent successfully')
+    except Exception as e:
+        logger.error(f'Failed to send email: {e}')
+    finally:
+        server.quit()
 
 
 class NPMRequester:
@@ -187,7 +225,7 @@ class NPMRequester:
         """
         settings = self.req_setting_list()
         if not settings:
-            raise Exception('nginx reload failed: no settings')
+            raise Exception('Nginx reload failed: no settings')
         setting = settings[0]
         self.req_update_setting(setting['id'], setting['meta'], setting['value'])
 
@@ -213,7 +251,7 @@ class NPMSync:
             return
         remote_certs = self.remote_npm_req.req_cert_list()
         local_certs = self.local_npm_req.req_cert_list()
-        failed = []
+        reports = []
         has_synced = False
         for domain in self.config.sync_domains:
             try:
@@ -231,6 +269,7 @@ class NPMSync:
                     local_cert_info = self.local_npm_req.req_cert_info(local_cert_id)
                     if local_cert_info['meta'] == remote_cert_meta:
                         logger.info(f'[{domain}] local is the same as remote, skip.')
+                        reports.append((domain, 'skipped', None))
                         continue
                 else:
                     logger.info(f'[{domain}] add cert item.')
@@ -243,20 +282,21 @@ class NPMSync:
                     intermediate_certificate=remote_cert_meta['intermediate_certificate'].encode('utf-8')
                 )
                 has_synced = True
+                reports.append((domain, 'synced', None))
             except Exception as e:
                 msg = f'[{domain}] sync failed: {e}'
-                failed.append(msg)
+                reports.append((domain, 'failed', msg))
                 logger.error(msg)
         if has_synced:
             logger.info('reloading nginx')
             self.local_npm_req.reload_nginx()
-        return failed
+        return reports
 
 
 def load_config():
     config_path = '../config.env.toml' if ENV == 'dev' else '/data/config.toml'
     if not os.path.exists(config_path):
-        raise Exception(f'config file not found: {config_path}')
+        raise Exception(f'Config file not found: {config_path}')
     with open(config_path, 'rb') as file:
         data = tomllib.load(file)
     return Config(**data)
@@ -265,17 +305,33 @@ def load_config():
 def main():
     config = load_config()
     logging.basicConfig(format='[%(asctime)s] [%(levelname)s] %(message)s', level=config.logger_level)
-    logger.info(f'will sync {len(config.sync_domains)} domains: {config.sync_domains},'
+    logger.info(f'Will sync {len(config.sync_domains)} domains: {config.sync_domains},'
                 f' from {config.remote_url} to {config.local_url}, interval: {config.interval}s')
     while True:
         syncer = NPMSync(config)
         try:
-            failed = syncer.run()
-            if failed:
-                raise Exception(f'\n'.join(failed))
+            reports = syncer.run()
+            synced_reports = [report for report in reports if report[1] == 'synced']
+            failed_reports = [report for report in reports if report[1] == 'failed']
+            if config.email_send and (synced_reports or failed_reports):
+                els = ['<h2>NPM SSL证书同步结果</h2>']
+                if synced_reports:
+                    els.append('<h4 style="color: green">【成功】</h4>')
+                    els.append('<ul>')
+                    els.extend([f'<li>{i[0]}</li>' for i in synced_reports])
+                    els.append('</ul>')
+                if failed_reports:
+                    els.append('<h4 style="color: red">【失败】</h4>')
+                    els.append('<ul>')
+                    els.extend([f'<li title="{i[2]}">{i[0]}</li>' for i in failed_reports])
+                    els.append('</ul>')
+                send_email(config, 'NPM SSL证书同步通知', '\n'.join(els))
         except Exception as e:
-            logger.error(f'syncer run failed: {e}')
-        logger.info(f'next will run at {datetime.datetime.now() + datetime.timedelta(seconds=config.interval)}')
+            if config.email_send:
+                send_email(config, 'NPM SSL证书同步通知', f'<p>同步失败：{e}</p>')
+            logger.error(f'Syncer run error: {e}')
+        logger.info(f'Next time it will run at {(datetime.datetime.now() + datetime.timedelta(
+            seconds=config.interval)).strftime("%Y-%m-%d %H:%M:%S")}')
         time.sleep(config.interval)
 
 
