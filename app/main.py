@@ -7,6 +7,8 @@ import datetime
 import requests
 from dataclasses import dataclass, field
 import tomllib
+import signal
+import sys
 from typing import overload, Literal, Optional, Any
 
 logger = logging.getLogger()
@@ -277,6 +279,12 @@ def main():
         time.sleep(config.interval)
 
 
-if __name__ == '__main__':
-    main()
+# noinspection PyUnusedLocal
+def signal_handler(sig, frame):
+    logger.info('Exiting Syncer')
+    sys.exit(0)
 
+
+if __name__ == '__main__':
+    signal.signal(signal.SIGTERM, signal_handler)
+    main()
