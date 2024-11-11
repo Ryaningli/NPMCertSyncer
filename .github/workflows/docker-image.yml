@@ -30,8 +30,8 @@ jobs:
         with:
           push: true
           tags: |
-            ${{ secrets.DOCKER_USERNAME }}/npm-cert-syncer:latest
             ${{ secrets.DOCKER_USERNAME }}/npm-cert-syncer:${{ env.version }}
+            ${{ secrets.DOCKER_USERNAME }}/npm-cert-syncer:latest
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
