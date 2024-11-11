@@ -7,7 +7,7 @@ import datetime
 import requests
 from dataclasses import dataclass, field
 import tomllib
-from typing import overload, Literal, Optional
+from typing import overload, Literal, Optional, Any
 
 logger = logging.getLogger()
 
@@ -151,6 +151,17 @@ class NPMRequester:
         }
         return self.req('POST', url, files=files)
 
+    def req_setting_list(self) -> dict:
+        return self.req('GET', '/api/settings')
+
+    def req_update_setting(self, setting_id: str, meta: Any, value: Any) -> dict:
+        url = f'/api/settings/{setting_id}'
+        payload = {
+            'meta': meta,
+            'value': value
+        }
+        return self.req('PUT', url, payload=payload)
+
     def get_letsencrypt_cert_meta(self, cert_id: int) -> dict[str, str]:
         resp = self.req_download_cert(cert_id)
         zip_file_like = io.BytesIO(resp.content)
@@ -167,6 +178,16 @@ class NPMRequester:
         if set(meta.keys()) != set(keys.values()):
             raise Exception(f'get letsencrypt cert meta failed, got data: {meta}')
         return meta
+
+    def reload_nginx(self):
+        """
+        exec command `nginx -s reload` by updating setting without changing data
+        """
+        settings = self.req_setting_list()
+        if not settings:
+            raise Exception('nginx reload failed: no settings')
+        setting = settings[0]
+        self.req_update_setting(setting['id'], setting['meta'], setting['value'])
 
 
 class NPMSync:
@@ -191,6 +212,7 @@ class NPMSync:
         remote_certs = self.remote_npm_req.req_cert_list()
         local_certs = self.local_npm_req.req_cert_list()
         failed = []
+        has_synced = False
         for domain in self.config.sync_domains:
             try:
                 remote_filter_certs = [cert for cert in remote_certs if
@@ -209,6 +231,7 @@ class NPMSync:
                         logger.info(f'[{domain}] local is the same as remote, skip.')
                         continue
                 else:
+                    logger.info(f'[{domain}] add cert item.')
                     local_cert_id = self.local_npm_req.req_add_cert(domain)['id']
                 logger.info(f'[{domain}] sync from remote.')
                 self.local_npm_req.req_upload_cert(
@@ -217,10 +240,14 @@ class NPMSync:
                     certificate_key=remote_cert_meta['certificate_key'].encode('utf-8'),
                     intermediate_certificate=remote_cert_meta['intermediate_certificate'].encode('utf-8')
                 )
+                has_synced = True
             except Exception as e:
                 msg = f'[{domain}] sync failed: {e}'
                 failed.append(msg)
                 logger.error(msg)
+        if has_synced:
+            logger.info('reloading nginx')
+            self.local_npm_req.reload_nginx()
         return failed
 
 
@@ -252,3 +279,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
