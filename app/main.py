@@ -288,7 +288,7 @@ class NPMSync:
                 reports.append((domain, 'failed', msg))
                 logger.error(msg)
         if has_synced:
-            logger.info('reloading nginx')
+            logger.info('Reloading nginx')
             self.local_npm_req.reload_nginx()
         return reports
 
@@ -316,12 +316,12 @@ def main():
             if config.email_send and (synced_reports or failed_reports):
                 els = ['<h2>NPM SSL证书同步结果</h2>']
                 if synced_reports:
-                    els.append('<h4 style="color: green">【成功】</h4>')
+                    els.append('<h4 style="color: green; margin-bottom: 0">【成功】</h4>')
                     els.append('<ul>')
                     els.extend([f'<li>{i[0]}</li>' for i in synced_reports])
                     els.append('</ul>')
                 if failed_reports:
-                    els.append('<h4 style="color: red">【失败】</h4>')
+                    els.append('<h4 style="color: red; margin-bottom: 0">【失败】</h4>')
                     els.append('<ul>')
                     els.extend([f'<li title="{i[2]}">{i[0]}</li>' for i in failed_reports])
                     els.append('</ul>')
