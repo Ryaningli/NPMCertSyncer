@@ -1,6 +1,7 @@
 import io
 import logging
 import os
+import re
 import time
 import zipfile
 import datetime
@@ -207,16 +208,19 @@ class NPMRequester:
         zip_file_like = io.BytesIO(resp.content)
         meta = {}
         keys = {
-            'cert1.pem': 'certificate',
-            'privkey1.pem': 'certificate_key',
-            'chain1.pem': 'intermediate_certificate',
+            r'cert\d+\.pem': 'certificate',
+            r'privkey\d+\.pem': 'certificate_key',
+            r'chain\d+\.pem': 'intermediate_certificate',
         }
         with zipfile.ZipFile(zip_file_like, 'r') as zip_ref:
-            for file_name in zip_ref.namelist():
-                if key := keys.get(file_name):
-                    meta[key] = zip_ref.read(file_name).decode('utf-8')
-        if set(meta.keys()) != set(keys.values()):
-            raise Exception(f'get letsencrypt cert meta failed, got data: {meta}')
+            filenames = list(zip_ref.namelist())
+            for pattern, key in keys.items():
+                for filename in filenames:
+                    if re.search(pattern, filename):
+                        meta[key] = zip_ref.read(filename).decode('utf-8')
+                        break
+                else:
+                    raise Exception(f'get letsencrypt cert meta failed, not found file: {pattern}')
         return meta
 
     def reload_nginx(self):
